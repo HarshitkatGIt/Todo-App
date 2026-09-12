@@ -8,6 +8,7 @@ import 'package:fnb_commitment/main.dart';
 import 'package:fnb_commitment/state/app_state.dart';
 import 'package:fnb_commitment/screens/dashboard_screen.dart';
 import 'package:fnb_commitment/screens/add_task_screen.dart';
+import 'package:fnb_commitment/utils/ist.dart';
 
 import 'fakes.dart';
 
@@ -194,4 +195,137 @@ void main() {
     final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
     expect((out['tasks'] as List).length, 1);
   });
+
+  testWidgets('tasks are colored red (due today), yellow (due not today), and green (done today)',
+      (tester) async {
+    final nowIst = DateTime.now().toUtc().add(istOffset);
+    final todayIso = specificDeadlineIso(DateTime(nowIst.year, nowIst.month, nowIst.day, 23, 59));
+    final futureIso = specificDeadlineIso(DateTime(nowIst.year, nowIst.month, nowIst.day, 23, 59).add(const Duration(days: 3)));
+    final tomorrowIso = specificDeadlineIso(DateTime(nowIst.year, nowIst.month, nowIst.day, 23, 59).add(const Duration(days: 1)));
+
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 't1',
+            'description': 'Task Due Today',
+            'type': 'normal',
+            'deadline': todayIso,
+            'status': 'pending',
+          },
+          {
+            'id': 't2',
+            'description': 'Task Due Not Today',
+            'type': 'normal',
+            'deadline': futureIso,
+            'status': 'pending',
+          },
+          {
+            'id': 't3',
+            'description': 'Daily Task Done Today',
+            'type': 'daily',
+            'deadline': tomorrowIso,
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChangeNotifierProvider<AppState>.value(
+          value: app,
+          child: const DashboardScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final dueTodayCard = tester.widget<Card>(
+      find.ancestor(
+        of: find.text('Task Due Today'),
+        matching: find.byType(Card),
+      ),
+    );
+    expect(dueTodayCard.color, Colors.red.shade100);
+
+    final dueNotTodayCard = tester.widget<Card>(
+      find.ancestor(
+        of: find.text('Task Due Not Today'),
+        matching: find.byType(Card),
+      ),
+    );
+    expect(dueNotTodayCard.color, Colors.yellow.shade100);
+
+    final doneTodayCard = tester.widget<Card>(
+      find.ancestor(
+        of: find.text('Daily Task Done Today'),
+        matching: find.byType(Card),
+      ),
+    );
+    expect(doneTodayCard.color, Colors.green.shade100);
+  });
+
+  testWidgets('editing a task updates the task and saves changes successfully',
+      (tester) async {
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'edit-me',
+            'description': 'Original description',
+            'type': 'normal',
+            'deadline': '2099-01-01T10:00:00+05:30',
+            'status': 'pending',
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChangeNotifierProvider<AppState>.value(
+          value: app,
+          child: const DashboardScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Original description'), findsOneWidget);
+
+    // Long-press to open actions sheet
+    await tester.longPress(find.text('Original description'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit task'), findsOneWidget);
+    await tester.tap(find.text('Edit task'));
+    await tester.pumpAndSettle();
+
+    // Verify AddTaskScreen is shown in edit mode
+    expect(find.text('Edit Task'), findsOneWidget);
+    expect(find.text('Original description'), findsOneWidget);
+
+    // Edit description
+    await tester.enterText(find.byType(TextField), 'Modified description');
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Save changes'));
+    await tester.pumpAndSettle();
+
+    // Verify screen popped and new description is rendered
+    expect(find.text('Modified description'), findsOneWidget);
+    expect(find.text('Original description'), findsNothing);
+
+    // Verify changes were saved to backend
+    final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
+    final tasksList = out['tasks'] as List<dynamic>;
+    expect(tasksList.length, 1);
+    expect((tasksList.first as Map<String, dynamic>)['description'], 'Modified description');
+  });
 }
+
+

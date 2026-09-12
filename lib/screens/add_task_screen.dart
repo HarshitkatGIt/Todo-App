@@ -7,10 +7,11 @@ import '../state/app_state.dart';
 import '../utils/ist.dart';
 
 class AddTaskScreen extends StatefulWidget {
-  const AddTaskScreen({super.key, this.onDone, this.initial});
+  const AddTaskScreen({super.key, this.onDone, this.initial, this.app});
 
   final VoidCallback? onDone;
   final Task? initial;
+  final AppState? app;
 
   @override
   State<AddTaskScreen> createState() => _AddTaskScreenState();
@@ -74,12 +75,36 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
       );
       return;
     }
-    final deadline = _type == 'daily'
-        ? nextDailyDeadlineIso(_dailyTime.hour, _dailyTime.minute)
-        : specificDeadlineIso(_normalDate);
+    final String deadline;
+    if (_type == 'daily') {
+      final initial = widget.initial;
+      if (initial != null && initial.isDaily) {
+        final currentIst = istWallFromIso(initial.deadline);
+        if (currentIst.hour == _dailyTime.hour && currentIst.minute == _dailyTime.minute) {
+          deadline = initial.deadline;
+        } else {
+          final scheduledDate = DateTime(
+            currentIst.year,
+            currentIst.month,
+            currentIst.day,
+            _dailyTime.hour,
+            _dailyTime.minute,
+          );
+          if (isPastDeadline(specificDeadlineIso(scheduledDate))) {
+            deadline = nextDailyDeadlineIso(_dailyTime.hour, _dailyTime.minute);
+          } else {
+            deadline = specificDeadlineIso(scheduledDate);
+          }
+        }
+      } else {
+        deadline = nextDailyDeadlineIso(_dailyTime.hour, _dailyTime.minute);
+      }
+    } else {
+      deadline = specificDeadlineIso(_normalDate);
+    }
 
-    final app = context.read<AppState>();
     try {
+      final app = widget.app ?? context.read<AppState>();
       if (widget.initial != null) {
         final original = widget.initial!;
         await app.updateTask(Task(

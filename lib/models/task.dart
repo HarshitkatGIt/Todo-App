@@ -1,3 +1,11 @@
+import '../utils/ist.dart';
+
+enum TaskColorCategory {
+  dueToday,
+  dueNotToday,
+  doneToday,
+}
+
 class Task {
   final String id;
   final String description;
@@ -38,4 +46,19 @@ class Task {
   bool get isDone => status == 'done';
   bool get isFailed => status == 'failed';
   bool get isPending => !isDaily && (status == null || status == 'pending');
+
+  TaskColorCategory colorCategory([DateTime? now]) {
+    now ??= nowUtc();
+    final late = isPastDeadline(deadline, now);
+    final dailyDone = isDaily && !isDailyActionableToday(deadline, now) && !late;
+
+    if (isDone || dailyDone) {
+      return TaskColorCategory.doneToday;
+    }
+    if (late || isFailed || isSameIstDay(deadline, now)) {
+      return TaskColorCategory.dueToday;
+    }
+    return TaskColorCategory.dueNotToday;
+  }
 }
+

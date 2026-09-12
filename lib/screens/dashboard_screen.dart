@@ -97,7 +97,10 @@ class DashboardScreen extends StatelessWidget {
     if (action == null || !context.mounted) return;
     if (action == 'edit') {
       await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => AddTaskScreen(initial: task),
+        builder: (_) => ChangeNotifierProvider.value(
+          value: app,
+          child: AddTaskScreen(initial: task, app: app),
+        ),
       ));
     } else if (action == 'delete') {
       await _confirmDelete(context, task);
@@ -233,11 +236,35 @@ class _TaskCard extends StatelessWidget {
       subtitle = 'Due ${formatIst(task.deadline)}';
     }
 
-    Color? chipColor;
-    if (task.isFailed) chipColor = Colors.red.shade200;
-    if (task.isDone) chipColor = Colors.green.shade200;
+    final category = task.colorCategory();
+    final Color cardColor;
+    final Color borderColor;
+    final Color chipColor;
+
+    switch (category) {
+      case TaskColorCategory.dueToday:
+        cardColor = Colors.red.shade100;
+        borderColor = Colors.red.shade400;
+        chipColor = Colors.red.shade200;
+        break;
+      case TaskColorCategory.dueNotToday:
+        cardColor = Colors.yellow.shade100;
+        borderColor = Colors.amber.shade600;
+        chipColor = Colors.yellow.shade200;
+        break;
+      case TaskColorCategory.doneToday:
+        cardColor = Colors.green.shade100;
+        borderColor = Colors.green.shade400;
+        chipColor = Colors.green.shade200;
+        break;
+    }
 
     return Card(
+      color: cardColor,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: borderColor, width: 1.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: ListTile(
         onLongPress: appOffline(context) ? null : onLongPress,
         title: Text(task.description),

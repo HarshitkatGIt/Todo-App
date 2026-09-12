@@ -326,6 +326,69 @@ void main() {
     expect(tasksList.length, 1);
     expect((tasksList.first as Map<String, dynamic>)['description'], 'Modified description');
   });
+
+  testWidgets('skip today advances daily task deadline and renders as done/green',
+      (tester) async {
+    final nowIst = DateTime.now().toUtc().add(istOffset);
+    final todayIso = specificDeadlineIso(DateTime(nowIst.year, nowIst.month, nowIst.day, 23, 59));
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'daily-skip',
+            'description': 'Daily task to skip',
+            'type': 'daily',
+            'deadline': todayIso,
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChangeNotifierProvider<AppState>.value(
+            value: app,
+            child: const DashboardScreen(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Long press to open actions
+    await tester.longPress(find.text('Daily task to skip'));
+    await tester.pumpAndSettle();
+
+    // Verify Skip today is shown and tap it
+    expect(find.text('Skip today'), findsOneWidget);
+    await tester.tap(find.text('Skip today'));
+    await tester.pumpAndSettle();
+
+    // Verify confirmation dialog
+    expect(find.text('Skip this task for today?'), findsOneWidget);
+    await tester.tap(find.text('Yes, skip today'));
+    await tester.pumpAndSettle();
+
+    // Verify card is now green (done today)
+    final card = tester.widget<Card>(
+      find.ancestor(
+        of: find.text('Daily task to skip'),
+        matching: find.byType(Card),
+      ),
+    );
+    expect(card.color, Colors.green.shade100);
+
+    // Verify backend received updated deadline
+    final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
+    final tasksList = out['tasks'] as List<dynamic>;
+    expect(tasksList.length, 1);
+    expect((tasksList.first as Map<String, dynamic>)['deadline'], contains('+05:30'));
+  });
 }
+
 
 

@@ -31,24 +31,34 @@ class DashboardScreen extends StatelessWidget {
       );
       return;
     }
-    final confirmed = await showDialog<bool>(
+    final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Are you sure task is completed?'),
         content: Text(task.description),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
             child: const Text('Cancel'),
           ),
+          if (task.isDaily)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'skip'),
+              child: const Text('Skip today'),
+            ),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(ctx, 'done'),
             child: const Text('Yes, mark done'),
           ),
         ],
       ),
     );
-    if (confirmed == true) {
+    if (!context.mounted || action == null || action == 'cancel') return;
+    if (action == 'skip') {
+      await _confirmSkip(context, task);
+      return;
+    }
+    if (action == 'done') {
       try {
         await app.markDone(task);
         if (context.mounted) {
@@ -66,6 +76,43 @@ class DashboardScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _confirmSkip(BuildContext context, Task task) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Skip this task for today?'),
+        content: Text(
+          '"${task.description}" will be moved to tomorrow without any penalty or notification.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, skip today'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await context.read<AppState>().skipTask(task);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Task skipped for today')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _openActions(BuildContext context, Task task) async {
     final app = context.read<AppState>();
     final action = await showModalBottomSheet<String>(
@@ -74,6 +121,18 @@ class DashboardScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (task.isDaily)
+              ListTile(
+                leading: const Icon(Icons.skip_next_outlined),
+                title: const Text('Skip today'),
+                enabled: !app.offline && isDailyActionableToday(task.deadline),
+                subtitle: app.offline
+                    ? const Text('Offline - changes are disabled')
+                    : (!isDailyActionableToday(task.deadline)
+                        ? const Text('Already completed or skipped for today')
+                        : const Text('Move to tomorrow without penalty')),
+                onTap: () => Navigator.pop(ctx, 'skip'),
+              ),
             ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Edit task'),
@@ -95,7 +154,9 @@ class DashboardScreen extends StatelessWidget {
       ),
     );
     if (action == null || !context.mounted) return;
-    if (action == 'edit') {
+    if (action == 'skip') {
+      await _confirmSkip(context, task);
+    } else if (action == 'edit') {
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ChangeNotifierProvider.value(
           value: app,

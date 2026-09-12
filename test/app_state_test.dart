@@ -82,6 +82,30 @@ void main() {
     expect(t.containsKey('status'), isFalse);
   });
 
+  test('skipTask on a daily task advances deadline +24h and adds no status', () async {
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'd',
+            'description': 'Daily',
+            'type': 'daily',
+            'deadline': '2026-08-24T09:00:00+05:30',
+          }
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+    await app.skipTask(app.tasks.first);
+    final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
+    final t = (out['tasks'] as List).first as Map<String, dynamic>;
+    expect(t['deadline'], '2026-08-25T09:00:00+05:30');
+    expect(t.containsKey('status'), isFalse);
+  });
+
+
   test('addTask appends to tasks', () async {
     final fake = FakeGithub(
       initialContent: jsonEncode({

@@ -100,6 +100,20 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  Future<void> skipTask(Task task) async {
+    final id = task.id;
+    await _commit((state) {
+      final list = state['tasks'] as List<dynamic>;
+      final idx = list.indexWhere((x) => x['id'] == id);
+      if (idx < 0) return;
+      final t = list[idx] as Map<String, dynamic>;
+      if (task.isDaily) {
+        t['deadline'] = advanceDeadline24h(t['deadline'] as String);
+      }
+    });
+  }
+
+
   Future<void> addTask(Task task) async {
     await _commit((state) {
       final list = state['tasks'] as List<dynamic>;

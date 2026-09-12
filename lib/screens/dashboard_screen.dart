@@ -82,7 +82,7 @@ class DashboardScreen extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('Skip this task for today?'),
         content: Text(
-          '"${task.description}" will be moved to tomorrow without any penalty or notification.',
+          '"${task.description}" will be moved to tomorrow. Your accountability partners will be informed (no penalty).',
         ),
         actions: [
           TextButton(

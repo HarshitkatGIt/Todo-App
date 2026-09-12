@@ -308,4 +308,64 @@ void main() {
     final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
     expect((out['tasks'] as List).isEmpty, isTrue);
   });
+
+  test('skipTask, updateTask, and deleteTask queue pending notifications', () async {
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'd1',
+            'description': 'Daily Meds',
+            'type': 'daily',
+            'deadline': '2026-08-24T09:00:00+05:30',
+          },
+          {
+            'id': 'n1',
+            'description': 'Normal Task',
+            'type': 'normal',
+            'deadline': '2026-08-25T10:00:00+05:30',
+            'status': 'pending',
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    // 1. Skip daily task
+    await app.skipTask(app.tasks.firstWhere((t) => t.id == 'd1'));
+    var out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
+    var notices = out['pending_notifications'] as List<dynamic>;
+    expect(notices.length, 1);
+    expect(notices[0], contains('NOTICE: Task skipped'));
+    expect(notices[0], contains('Daily Meds'));
+
+    // 2. Update task
+    fake.initialContent = fake.lastPutContent;
+    await app.refresh();
+    await app.updateTask(Task(
+      id: 'n1',
+      description: 'Normal Task Renamed',
+      type: 'normal',
+      deadline: '2026-08-26T12:00:00+05:30',
+      status: 'pending',
+    ));
+    out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
+    notices = out['pending_notifications'] as List<dynamic>;
+    expect(notices.length, 2);
+    expect(notices[1], contains('NOTICE: Task edited'));
+    expect(notices[1], contains('Normal Task Renamed'));
+    expect(notices[1], contains('renamed from "Normal Task"'));
+
+    // 3. Delete task
+    fake.initialContent = fake.lastPutContent;
+    await app.refresh();
+    await app.deleteTask('n1');
+    out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
+    notices = out['pending_notifications'] as List<dynamic>;
+    expect(notices.length, 3);
+    expect(notices[2], contains('NOTICE: Task deleted'));
+    expect(notices[2], contains('Normal Task Renamed'));
+  });
 }

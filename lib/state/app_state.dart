@@ -84,6 +84,14 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  void _queueNotification(Map<String, dynamic> state, String message) {
+    final list = (state['pending_notifications'] as List<dynamic>?) != null
+        ? List<dynamic>.from(state['pending_notifications'] as List<dynamic>)
+        : <dynamic>[];
+    list.add(message);
+    state['pending_notifications'] = list;
+  }
+
   Future<void> markDone(Task task) async {
     final id = task.id;
     final isDaily = task.isDaily;
@@ -108,7 +116,16 @@ class AppState extends ChangeNotifier {
       if (idx < 0) return;
       final t = list[idx] as Map<String, dynamic>;
       if (task.isDaily) {
-        t['deadline'] = advanceDeadline24h(t['deadline'] as String);
+        final oldDeadline = t['deadline'] as String;
+        final newDeadline = advanceDeadline24h(oldDeadline);
+        t['deadline'] = newDeadline;
+        _queueNotification(
+          state,
+          'NOTICE: Task skipped\n'
+          'Task: "${task.description}"\n'
+          'Daily task skipped for today (next due: ${formatIst(newDeadline)} IST).\n'
+          '(Action at ${formatIst(nowUtc().toIso8601String())} IST)',
+        );
       }
     });
   }
@@ -127,14 +144,42 @@ class AppState extends ChangeNotifier {
       final list = state['tasks'] as List<dynamic>;
       final idx = list.indexWhere((x) => x['id'] == id);
       if (idx < 0) return;
+      final old = list[idx] as Map<String, dynamic>;
+      final oldDesc = old['description'] as String? ?? '';
+      final oldDeadline = old['deadline'] as String? ?? '';
       list[idx] = task.toJson();
+
+      final buffer = StringBuffer('NOTICE: Task edited\n');
+      if (oldDesc.isNotEmpty && oldDesc != task.description) {
+        buffer.writeln('Task: "${task.description}" (renamed from "$oldDesc")');
+      } else {
+        buffer.writeln('Task: "${task.description}"');
+      }
+      if (oldDeadline.isNotEmpty && oldDeadline != task.deadline) {
+        buffer.writeln('Deadline changed to: ${formatIst(task.deadline)} IST');
+      } else {
+        buffer.writeln('Deadline: ${formatIst(task.deadline)} IST');
+      }
+      buffer.write('(Action at ${formatIst(nowUtc().toIso8601String())} IST)');
+      _queueNotification(state, buffer.toString());
     });
   }
 
   Future<void> deleteTask(String id) async {
     await _commit((state) {
       final list = state['tasks'] as List<dynamic>;
-      list.removeWhere((x) => x['id'] == id);
+      final idx = list.indexWhere((x) => x['id'] == id);
+      if (idx < 0) return;
+      final t = list[idx] as Map<String, dynamic>;
+      final desc = t['description'] as String? ?? id;
+      list.removeAt(idx);
+      _queueNotification(
+        state,
+        'NOTICE: Task deleted\n'
+        'Task: "$desc"\n'
+        'Task was removed permanently.\n'
+        '(Action at ${formatIst(nowUtc().toIso8601String())} IST)',
+      );
     });
   }
 }

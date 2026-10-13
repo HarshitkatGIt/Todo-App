@@ -114,11 +114,13 @@ class _MainTabsState extends State<MainTabs> {
 
   @override
   Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
     return Scaffold(
       body: IndexedStack(
         index: _index,
         children: [
-          const DashboardScreen(),
+          const DashboardScreen(showPenaltiesOnly: false),
+          const DashboardScreen(showPenaltiesOnly: true),
           AddTaskScreen(onDone: () => setState(() => _index = 0)),
           const SettingsScreen(),
         ],
@@ -126,10 +128,27 @@ class _MainTabsState extends State<MainTabs> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.list), label: 'Tasks'),
-          NavigationDestination(icon: Icon(Icons.add), label: 'Add'),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
+        destinations: [
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: app.hasPendingTasksToday,
+              backgroundColor: Colors.red,
+              smallSize: 8,
+              child: const Icon(Icons.list_alt),
+            ),
+            label: 'Tasks',
+          ),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: app.hasPendingPenaltiesToday,
+              backgroundColor: Colors.red,
+              smallSize: 8,
+              child: const Icon(Icons.warning_amber_rounded),
+            ),
+            label: 'Penalties',
+          ),
+          const NavigationDestination(icon: Icon(Icons.add), label: 'Add'),
+          const NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );

@@ -66,6 +66,7 @@ void main() {
             'type': 'normal',
             'deadline': '2099-01-01T10:00:00+05:30',
             'status': 'pending',
+            'last_progress_date': todayIstDateString(),
           },
           {
             'id': 'b',
@@ -91,7 +92,7 @@ void main() {
 
     expect(find.text('Task A'), findsOneWidget);
     expect(find.text('Task B'), findsOneWidget);
-    expect(find.text('Next penalty if missed: Rs.10'), findsOneWidget);
+    expect(find.text('Next penalty: Rs.10'), findsOneWidget);
 
     final doneBtn = find.widgetWithText(ElevatedButton, 'Done').first;
     await tester.tap(doneBtn);
@@ -111,6 +112,7 @@ void main() {
             'type': 'normal',
             'deadline': '2000-01-01T10:00:00+05:30',
             'status': 'pending',
+            'last_progress_date': todayIstDateString(),
           }
         ],
       }),
@@ -213,6 +215,7 @@ void main() {
             'type': 'normal',
             'deadline': todayIso,
             'status': 'pending',
+            'last_progress_date': todayIstDateString(),
           },
           {
             'id': 't2',
@@ -220,6 +223,7 @@ void main() {
             'type': 'normal',
             'deadline': futureIso,
             'status': 'pending',
+            'last_progress_date': todayIstDateString(),
           },
           {
             'id': 't3',
@@ -280,6 +284,7 @@ void main() {
             'type': 'normal',
             'deadline': '2099-01-01T10:00:00+05:30',
             'status': 'pending',
+            'last_progress_date': todayIstDateString(),
           },
         ],
       }),
@@ -327,19 +332,17 @@ void main() {
     expect((tasksList.first as Map<String, dynamic>)['description'], 'Modified description');
   });
 
-  testWidgets('skip today advances daily task deadline and renders as done/green',
+  testWidgets('crisis mode button shows confirmation and activates',
       (tester) async {
-    final nowIst = DateTime.now().toUtc().add(istOffset);
-    final todayIso = specificDeadlineIso(DateTime(nowIst.year, nowIst.month, nowIst.day, 23, 59));
     final fake = FakeGithub(
       initialContent: jsonEncode({
-        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'penalty': {'month': '2026-08', 'miss_count': 1},
         'tasks': [
           {
-            'id': 'daily-skip',
-            'description': 'Daily task to skip',
-            'type': 'daily',
-            'deadline': todayIso,
+            'id': 't1',
+            'description': 'Trivial task',
+            'type': 'trivial',
+            'deadline': '2026-08-25T18:00:00+05:30',
           },
         ],
       }),
@@ -359,34 +362,293 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Long press to open actions
-    await tester.longPress(find.text('Daily task to skip'));
-    await tester.pumpAndSettle();
+    expect(find.text('Crisis Mode: OFF'), findsOneWidget);
+    expect(find.text('Trivial task'), findsOneWidget);
 
-    // Verify Skip today is shown and tap it
-    expect(find.text('Skip today'), findsOneWidget);
-    await tester.tap(find.text('Skip today'));
+    // Tap Crisis Mode button
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Crisis Mode'));
     await tester.pumpAndSettle();
 
     // Verify confirmation dialog
-    expect(find.text('Skip this task for today?'), findsOneWidget);
-    await tester.tap(find.text('Yes, skip today'));
+    expect(find.text('Activate Crisis Mode?'), findsOneWidget);
+    expect(find.textContaining('incurs an immediate Rs. 20 penalty'), findsOneWidget);
+
+    // Confirm activation
+    await tester.tap(find.text('Activate (Rs.20)'));
     await tester.pumpAndSettle();
 
-    // Verify card is now green (done today)
-    final card = tester.widget<Card>(
-      find.ancestor(
-        of: find.text('Daily task to skip'),
-        matching: find.byType(Card),
+    // Verify Crisis Mode is active and trivial task was deleted
+    expect(find.text('Crisis Mode: ACTIVE (Max Rs.5)'), findsOneWidget);
+    expect(find.text('Trivial task'), findsNothing);
+    expect(find.text('Next penalty: Rs.5'), findsOneWidget);
+  });
+
+  testWidgets('daily task can be deleted with Rs. 20 penalty warning, normal task cannot be deleted',
+      (tester) async {
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'daily-1',
+            'description': 'Daily task to delete',
+            'type': 'daily',
+            'deadline': '2099-01-01T23:59:00+05:30',
+          },
+          {
+            'id': 'normal-1',
+            'description': 'Normal task no delete',
+            'type': 'normal',
+            'deadline': '2099-01-01T23:59:00+05:30',
+            'status': 'pending',
+            'last_progress_date': todayIstDateString(),
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChangeNotifierProvider<AppState>.value(
+            value: app,
+            child: const DashboardScreen(),
+          ),
+        ),
       ),
     );
-    expect(card.color, Colors.green.shade100);
+    await tester.pumpAndSettle();
 
-    // Verify backend received updated deadline
+    // 1. Long press normal task -> only Edit task, no Delete task, no Skip
+    await tester.longPress(find.text('Normal task no delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit task'), findsOneWidget);
+    expect(find.text('Delete task'), findsNothing);
+    expect(find.text('Skip today'), findsNothing);
+    // Dismiss bottom sheet
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    // 2. Long press daily task -> Edit task and Delete task, no Skip
+    await tester.longPress(find.text('Daily task to delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit task'), findsOneWidget);
+    expect(find.text('Delete task'), findsOneWidget);
+    expect(find.text('Skip today'), findsNothing);
+
+    // Tap Delete task
+    await tester.tap(find.text('Delete task'));
+    await tester.pumpAndSettle();
+
+    // Verify warning dialog
+    expect(find.text('Delete this daily task?'), findsOneWidget);
+    expect(find.textContaining('incurs an immediate penalty of Rs. 20'), findsOneWidget);
+
+    // Confirm deletion
+    await tester.tap(find.text('Delete (Rs.20 penalty)'));
+    await tester.pumpAndSettle();
+
+    // Daily task should be deleted
+    expect(find.text('Daily task to delete'), findsNothing);
+    expect(find.text('Normal task no delete'), findsOneWidget);
+
     final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
     final tasksList = out['tasks'] as List<dynamic>;
     expect(tasksList.length, 1);
-    expect((tasksList.first as Map<String, dynamic>)['deadline'], contains('+05:30'));
+    expect((tasksList.first as Map<String, dynamic>)['id'], 'normal-1');
+  });
+
+  testWidgets('blocking 50-word progress view blocks dashboard until 50 words submitted',
+      (tester) async {
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'norm-progress',
+            'description': 'Important normal task',
+            'type': 'normal',
+            'deadline': '2099-01-01T23:59:00+05:30',
+            'status': 'pending',
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChangeNotifierProvider<AppState>.value(
+            value: app,
+            child: const DashboardScreen(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 1. Verify blocking screen is shown
+    expect(find.text('Daily Progress Required'), findsOneWidget);
+    expect(find.text('Important normal task'), findsOneWidget);
+    // Regular dashboard elements should NOT be shown
+    expect(find.text('Miss count: 0'), findsNothing);
+
+    // 2. Button is disabled when words < 50
+    final submitBtnFinder = find.widgetWithText(ElevatedButton, 'Submit Today\'s Progress');
+    expect(submitBtnFinder, findsOneWidget);
+    final btnWidgetBefore = tester.widget<ElevatedButton>(submitBtnFinder);
+    expect(btnWidgetBefore.onPressed, isNull);
+
+    // 3. Enter less than 50 words
+    await tester.enterText(find.byType(TextField), 'This is only five words.');
+    await tester.pump();
+    expect(find.text('5 / 50 words'), findsOneWidget);
+    final btnWidgetMid = tester.widget<ElevatedButton>(submitBtnFinder);
+    expect(btnWidgetMid.onPressed, isNull);
+
+    // 4. Enter 50 words
+    final fiftyWords = List.generate(50, (i) => 'word$i').join(' ');
+    await tester.enterText(find.byType(TextField), fiftyWords);
+    await tester.pump();
+    expect(find.text('✓ 50 words (Requirement met)'), findsOneWidget);
+    final btnWidgetAfter = tester.widget<ElevatedButton>(submitBtnFinder);
+    expect(btnWidgetAfter.onPressed, isNotNull);
+
+    // 5. Submit progress -> dashboard unblocks
+    await tester.tap(submitBtnFinder);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Daily Progress Required'), findsNothing);
+    expect(find.text('Important normal task'), findsOneWidget);
+    expect(find.text('Miss count: 0'), findsOneWidget);
+  });
+
+  testWidgets('penalty rule rendered in separate section and deleting is free',
+      (tester) async {
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'p1',
+            'description': 'No ruminating today',
+            'type': 'penalty',
+            'deadline': '2099-01-01T23:59:00+05:30',
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChangeNotifierProvider<AppState>.value(
+            value: app,
+            child: const DashboardScreen(showPenaltiesOnly: true),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify Penalties & Rules section header and compact badge
+    expect(find.text('Penalties & Rules'), findsOneWidget);
+    expect(find.text('No ruminating today'), findsOneWidget);
+    expect(find.text('Rs.10'), findsOneWidget);
+
+    // Long-press to open actions
+    await tester.longPress(find.text('No ruminating today'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete penalty rule'), findsOneWidget);
+    await tester.tap(find.text('Delete penalty rule'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete this penalty rule?'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.textContaining('free (costs Rs. 0)'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Delete (free)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No ruminating today'), findsNothing);
+    expect(find.text('No penalty rules active. Add one from the Add tab.'), findsOneWidget);
+
+    final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
+    expect((out['tasks'] as List).isEmpty, isTrue);
+    expect(out.containsKey('pending_notifications'), isFalse);
+  });
+
+  testWidgets('MainTabs separates tasks and penalties into distinct tabs with individual red dot badges',
+      (tester) async {
+    final nowIst = DateTime.now().toUtc().add(istOffset);
+    final todayIso = specificDeadlineIso(DateTime(nowIst.year, nowIst.month, nowIst.day, 23, 59));
+
+    final fake = FakeGithub(
+      initialContent: jsonEncode({
+        'penalty': {'month': '2026-08', 'miss_count': 0},
+        'tasks': [
+          {
+            'id': 'task-1',
+            'description': 'Regular Task Today',
+            'type': 'normal',
+            'deadline': todayIso,
+            'status': 'pending',
+            'last_progress_date': todayIstDateString(),
+          },
+          {
+            'id': 'penalty-1',
+            'description': 'Rule No Stress',
+            'type': 'penalty',
+            'deadline': todayIso,
+          },
+        ],
+      }),
+    );
+    final app = AppState(github: fake);
+    await app.refresh();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChangeNotifierProvider<AppState>.value(
+          value: app,
+          child: const MainTabs(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 1. Both red dot badges are visible on bottom navigation bar
+    expect(app.hasPendingTasksToday, isTrue);
+    expect(app.hasPendingPenaltiesToday, isTrue);
+
+    final badges = tester.widgetList<Badge>(find.byType(Badge)).toList();
+    expect(badges.any((b) => b.isLabelVisible && b.child is Icon && (b.child as Icon).icon == Icons.list_alt), isTrue);
+    expect(badges.any((b) => b.isLabelVisible && b.child is Icon && (b.child as Icon).icon == Icons.warning_amber_rounded), isTrue);
+
+    // 2. Initial tab is Tasks (index 0): regular task is shown, penalty rule is NOT shown
+    expect(find.text('Regular Task Today'), findsOneWidget);
+    expect(find.text('Rule No Stress'), findsNothing);
+
+    // 3. Switch to Penalties tab (index 1)
+    await tester.tap(find.text('Penalties'));
+    await tester.pumpAndSettle();
+
+    // In Penalties tab: penalty rule is shown, regular task is NOT shown
+    expect(find.text('Rule No Stress'), findsOneWidget);
+    expect(find.text('Regular Task Today'), findsNothing);
+    expect(find.text('Rs.10'), findsOneWidget);
   });
 }
 

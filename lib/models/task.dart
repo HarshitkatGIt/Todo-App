@@ -12,6 +12,8 @@ class Task {
   final String type;
   final String deadline;
   final String? status;
+  final String? lastProgressDate;
+  final List<Map<String, dynamic>>? progressLogs;
 
   Task({
     required this.id,
@@ -19,6 +21,8 @@ class Task {
     required this.type,
     required this.deadline,
     this.status,
+    this.lastProgressDate,
+    this.progressLogs,
   });
 
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -28,6 +32,10 @@ class Task {
       type: json['type'] as String,
       deadline: json['deadline'] as String,
       status: json['status'] as String?,
+      lastProgressDate: json['last_progress_date'] as String?,
+      progressLogs: (json['progress_logs'] as List<dynamic>?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
     );
   }
 
@@ -39,20 +47,35 @@ class Task {
       'deadline': deadline,
     };
     if (status != null) map['status'] = status;
+    if (lastProgressDate != null) map['last_progress_date'] = lastProgressDate;
+    if (progressLogs != null) map['progress_logs'] = progressLogs;
     return map;
   }
 
   bool get isDaily => type == 'daily';
+  bool get isTrivial => type == 'trivial';
+  bool get isPenalty => type == 'penalty';
   bool get isDone => status == 'done';
   bool get isFailed => status == 'failed';
-  bool get isPending => !isDaily && (status == null || status == 'pending');
+  bool get isPending => !isDaily && !isPenalty && (status == null || status == 'pending');
+
+  bool get requiresDailyProgress => type == 'normal' && isPending;
+
+  bool hasProgressToday([DateTime? now]) {
+    if (lastProgressDate == null) return false;
+    return lastProgressDate == todayIstDateString(now);
+  }
+
+  bool needsProgressToday([DateTime? now]) {
+    return requiresDailyProgress && !hasProgressToday(now);
+  }
 
   TaskColorCategory colorCategory([DateTime? now]) {
     now ??= nowUtc();
     final late = isPastDeadline(deadline, now);
-    final dailyDone = isDaily && !isDailyActionableToday(deadline, now) && !late;
+    final recurringDone = (isDaily || isPenalty) && !isDailyActionableToday(deadline, now) && !late;
 
-    if (isDone || dailyDone) {
+    if (isDone || recurringDone) {
       return TaskColorCategory.doneToday;
     }
     if (late || isFailed || isSameIstDay(deadline, now)) {

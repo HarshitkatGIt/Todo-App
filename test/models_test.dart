@@ -42,6 +42,19 @@ void main() {
     );
   });
 
+  test('trivial task flags', () {
+    final t = Task(
+      id: 'z',
+      description: 'triv',
+      type: 'trivial',
+      deadline: '2026-08-24T18:00:00+05:30',
+      status: 'pending',
+    );
+    expect(t.isTrivial, isTrue);
+    expect(t.isDaily, isFalse);
+    expect(t.isPending, isTrue);
+  });
+
   test('colorCategory returns dueToday, dueNotToday, and doneToday correctly', () {
     // 2026-08-26 10:00:00 IST = 2026-08-26 04:30:00 UTC
     final now = DateTime.utc(2026, 8, 26, 4, 30);
@@ -112,6 +125,50 @@ void main() {
       status: 'done',
     );
     expect(normalDone.colorCategory(now), TaskColorCategory.doneToday);
+  });
+
+  test('penalty task flags and round-trip', () {
+    final t = Task(
+      id: 'p1',
+      description: 'No ruminating',
+      type: 'penalty',
+      deadline: '2026-08-26T23:59:00+05:30',
+    );
+    expect(t.isPenalty, isTrue);
+    expect(t.isDaily, isFalse);
+    expect(t.isPending, isFalse);
+    final j = t.toJson();
+    final t2 = Task.fromJson(j);
+    expect(t2.type, 'penalty');
+  });
+
+  test('progress logs and needsProgressToday', () {
+    final now = DateTime.utc(2026, 8, 26, 4, 30);
+    final t = Task(
+      id: 'n1',
+      description: 'Study',
+      type: 'normal',
+      deadline: '2026-08-28T23:59:00+05:30',
+      status: 'pending',
+    );
+    expect(t.hasProgressToday(now), isFalse);
+    expect(t.needsProgressToday(now), isTrue);
+
+    final updated = Task(
+      id: 'n1',
+      description: 'Study',
+      type: 'normal',
+      deadline: '2026-08-28T23:59:00+05:30',
+      status: 'pending',
+      lastProgressDate: '2026-08-26',
+      progressLogs: [{'date': '2026-08-26T10:00:00+05:30', 'text': 'Studied 50 words'}],
+    );
+    expect(updated.hasProgressToday(now), isTrue);
+    expect(updated.needsProgressToday(now), isFalse);
+    final json = updated.toJson();
+    final restored = Task.fromJson(json);
+    expect(restored.lastProgressDate, '2026-08-26');
+    expect(restored.progressLogs?.length, 1);
   });
 }
 

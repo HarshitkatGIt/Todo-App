@@ -16,13 +16,15 @@ class AppState extends ChangeNotifier {
   List<Task> tasks = [];
   int missCount = 0;
   String penaltyMonth = '';
+  bool crisisMode = false;
   bool offline = false;
   bool loading = false;
   String? error;
 
   int get nextPenalty {
-    final amount = 5 * (1 << missCount);
-    return amount > 80 ? 80 : amount;
+    if (crisisMode) return 5;
+    final amount = 5 * (missCount + 1);
+    return amount > 20 ? 20 : amount;
   }
 
   Map<String, dynamic> _decodeState(String raw) =>
@@ -33,10 +35,46 @@ class AppState extends ChangeNotifier {
     final pen = state['penalty'] as Map<String, dynamic>? ?? {};
     penaltyMonth = pen['month'] as String? ?? '';
     missCount = (pen['miss_count'] as int?) ?? 0;
+    crisisMode = (state['crisis_mode'] as bool?) ?? false;
     final rawTasks = state['tasks'] as List<dynamic>? ?? [];
-    tasks = rawTasks
+    final parsed = rawTasks
         .map((e) => Task.fromJson(e as Map<String, dynamic>))
         .toList();
+    parsed.sort((a, b) => DateTime.parse(a.deadline).compareTo(DateTime.parse(b.deadline)));
+    tasks = parsed;
+  }
+
+  List<Task> get tasksNeedingProgressToday {
+    return tasks.where((t) => t.needsProgressToday()).toList();
+  }
+
+  bool get hasPendingToday => hasPendingTasksToday || hasPendingPenaltiesToday;
+
+  bool get hasPendingTasksToday {
+    final now = nowUtc();
+    for (final t in tasks) {
+      if (t.isPenalty) continue;
+      if (t.isDaily) {
+        if (isDailyActionableToday(t.deadline, now)) return true;
+      } else {
+        if (t.isPending) {
+          if (isPastDeadline(t.deadline, now) || isSameIstDay(t.deadline, now)) return true;
+          if (t.needsProgressToday(now)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool get hasPendingPenaltiesToday {
+    if (crisisMode) return false;
+    final now = nowUtc();
+    for (final t in tasks) {
+      if (t.isPenalty) {
+        if (isDailyActionableToday(t.deadline, now)) return true;
+      }
+    }
+    return false;
   }
 
   Future<void> refresh() async {
@@ -84,52 +122,34 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void _queueNotification(Map<String, dynamic> state, String message) {
+  void _queuePenalty(Map<String, dynamic> state,
+      {required String reason, required int amount}) {
     final list = (state['pending_notifications'] as List<dynamic>?) != null
         ? List<dynamic>.from(state['pending_notifications'] as List<dynamic>)
         : <dynamic>[];
-    list.add(message);
+    list.add({
+      'type': 'penalty',
+      'reason': reason,
+      'amount': amount,
+    });
     state['pending_notifications'] = list;
   }
 
   Future<void> markDone(Task task) async {
     final id = task.id;
-    final isDaily = task.isDaily;
+    final isRecurring = task.isDaily || task.isPenalty;
     await _commit((state) {
       final list = state['tasks'] as List<dynamic>;
       final idx = list.indexWhere((x) => x['id'] == id);
       if (idx < 0) return;
       final t = list[idx] as Map<String, dynamic>;
-      if (isDaily) {
+      if (isRecurring) {
         t['deadline'] = advanceDeadline24h(t['deadline'] as String);
       } else {
         list.removeAt(idx);
       }
     });
   }
-
-  Future<void> skipTask(Task task) async {
-    final id = task.id;
-    await _commit((state) {
-      final list = state['tasks'] as List<dynamic>;
-      final idx = list.indexWhere((x) => x['id'] == id);
-      if (idx < 0) return;
-      final t = list[idx] as Map<String, dynamic>;
-      if (task.isDaily) {
-        final oldDeadline = t['deadline'] as String;
-        final newDeadline = advanceDeadline24h(oldDeadline);
-        t['deadline'] = newDeadline;
-        _queueNotification(
-          state,
-          'NOTICE: Task skipped\n'
-          'Task: "${task.description}"\n'
-          'Daily task skipped for today (next due: ${formatIst(newDeadline)} IST).\n'
-          '(Action at ${formatIst(nowUtc().toIso8601String())} IST)',
-        );
-      }
-    });
-  }
-
 
   Future<void> addTask(Task task) async {
     await _commit((state) {
@@ -144,42 +164,79 @@ class AppState extends ChangeNotifier {
       final list = state['tasks'] as List<dynamic>;
       final idx = list.indexWhere((x) => x['id'] == id);
       if (idx < 0) return;
-      final old = list[idx] as Map<String, dynamic>;
-      final oldDesc = old['description'] as String? ?? '';
-      final oldDeadline = old['deadline'] as String? ?? '';
-      list[idx] = task.toJson();
-
-      final buffer = StringBuffer('NOTICE: Task edited\n');
-      if (oldDesc.isNotEmpty && oldDesc != task.description) {
-        buffer.writeln('Task: "${task.description}" (renamed from "$oldDesc")');
-      } else {
-        buffer.writeln('Task: "${task.description}"');
-      }
-      if (oldDeadline.isNotEmpty && oldDeadline != task.deadline) {
-        buffer.writeln('Deadline changed to: ${formatIst(task.deadline)} IST');
-      } else {
-        buffer.writeln('Deadline: ${formatIst(task.deadline)} IST');
-      }
-      buffer.write('(Action at ${formatIst(nowUtc().toIso8601String())} IST)');
-      _queueNotification(state, buffer.toString());
+      final existing = list[idx] as Map<String, dynamic>;
+      existing['description'] = task.description;
     });
   }
 
-  Future<void> deleteTask(String id) async {
+  Future<void> deleteDailyTask(Task task) async {
+    if (!task.isDaily) {
+      throw ArgumentError('Only daily tasks can be deleted');
+    }
+    final id = task.id;
     await _commit((state) {
       final list = state['tasks'] as List<dynamic>;
       final idx = list.indexWhere((x) => x['id'] == id);
       if (idx < 0) return;
-      final t = list[idx] as Map<String, dynamic>;
-      final desc = t['description'] as String? ?? id;
       list.removeAt(idx);
-      _queueNotification(
+      _queuePenalty(
         state,
-        'NOTICE: Task deleted\n'
-        'Task: "$desc"\n'
-        'Task was removed permanently.\n'
-        '(Action at ${formatIst(nowUtc().toIso8601String())} IST)',
+        reason: 'Daily task deleted — "${task.description}"',
+        amount: 20,
       );
+    });
+  }
+
+  Future<void> deletePenaltyTask(Task task) async {
+    if (!task.isPenalty) {
+      throw ArgumentError('Only penalty tasks can be deleted with deletePenaltyTask');
+    }
+    final id = task.id;
+    await _commit((state) {
+      final list = state['tasks'] as List<dynamic>;
+      final idx = list.indexWhere((x) => x['id'] == id);
+      if (idx < 0) return;
+      list.removeAt(idx);
+    });
+  }
+
+  Future<void> logDailyProgress(Map<String, String> progressMap) async {
+    final today = todayIstDateString();
+    final nowIso = toIsoIst(nowUtc());
+    await _commit((state) {
+      final list = state['tasks'] as List<dynamic>;
+      for (final entry in progressMap.entries) {
+        final taskId = entry.key;
+        final text = entry.value.trim();
+        final idx = list.indexWhere((x) => x['id'] == taskId);
+        if (idx < 0) continue;
+        final t = list[idx] as Map<String, dynamic>;
+        t['last_progress_date'] = today;
+        final logs = (t['progress_logs'] as List<dynamic>?) != null
+            ? List<dynamic>.from(t['progress_logs'] as List<dynamic>)
+            : <dynamic>[];
+        logs.add({'date': nowIso, 'text': text});
+        t['progress_logs'] = logs;
+      }
+    });
+  }
+
+  Future<void> activateCrisisMode() async {
+    await _commit((state) {
+      state['crisis_mode'] = true;
+      final list = state['tasks'] as List<dynamic>;
+      list.removeWhere((t) => (t as Map<String, dynamic>)['type'] == 'trivial');
+      _queuePenalty(
+        state,
+        reason: 'Crisis Mode activated',
+        amount: 20,
+      );
+    });
+  }
+
+  Future<void> deactivateCrisisMode() async {
+    await _commit((state) {
+      state['crisis_mode'] = false;
     });
   }
 }

@@ -62,3 +62,15 @@ bool isDailyActionableToday(String iso, [DateTime? now]) {
   now ??= nowUtc();
   return !isPastDeadline(iso, now) && isSameIstDay(iso, now);
 }
+
+String todayIstDateString([DateTime? now]) {
+  now ??= nowUtc();
+  final ist = now.toUtc().add(istOffset);
+  return '${ist.year}-${pad2(ist.month)}-${pad2(ist.day)}';
+}
+
+int countWords(String text) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return 0;
+  return RegExp(r'\S+').allMatches(trimmed).length;
+}

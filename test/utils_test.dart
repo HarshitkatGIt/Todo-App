@@ -84,5 +84,17 @@ void main() {
         isFalse,
       );
     });
+
+    test('todayIstDateString returns YYYY-MM-DD in IST', () {
+      final utcTime = DateTime.utc(2026, 8, 26, 20, 0); // 27 Aug 01:30 IST
+      expect(todayIstDateString(utcTime), '2026-08-27');
+    });
+
+    test('countWords accurately counts whitespace separated words', () {
+      expect(countWords(''), 0);
+      expect(countWords('   '), 0);
+      expect(countWords('one'), 1);
+      expect(countWords('one two  three\nfour\tfive'), 5);
+    });
   });
 }

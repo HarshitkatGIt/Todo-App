@@ -447,7 +447,7 @@ void main() {
     expect(out.containsKey('pending_notifications'), isFalse);
   });
 
-  test('logDailyProgress updates last_progress_date and stores logs', () async {
+  test('logDailyProgress updates last_progress_date and does not store logs', () async {
     final fake = FakeGithub(
       initialContent: jsonEncode({
         'penalty': {'month': '2026-08', 'miss_count': 0},
@@ -471,9 +471,7 @@ void main() {
     final out = jsonDecode(fake.lastPutContent!) as Map<String, dynamic>;
     final t = (out['tasks'] as List).first as Map<String, dynamic>;
     expect(t['last_progress_date'], isNotNull);
-    final logs = t['progress_logs'] as List;
-    expect(logs.length, 1);
-    expect((logs.first as Map)['text'], contains('extensive progress'));
+    expect(t.containsKey('progress_logs'), isFalse);
 
     expect(app.tasksNeedingProgressToday.isEmpty, isTrue);
   });

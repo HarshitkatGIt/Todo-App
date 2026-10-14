@@ -202,21 +202,15 @@ class AppState extends ChangeNotifier {
 
   Future<void> logDailyProgress(Map<String, String> progressMap) async {
     final today = todayIstDateString();
-    final nowIso = toIsoIst(nowUtc());
     await _commit((state) {
       final list = state['tasks'] as List<dynamic>;
       for (final entry in progressMap.entries) {
         final taskId = entry.key;
-        final text = entry.value.trim();
         final idx = list.indexWhere((x) => x['id'] == taskId);
         if (idx < 0) continue;
         final t = list[idx] as Map<String, dynamic>;
         t['last_progress_date'] = today;
-        final logs = (t['progress_logs'] as List<dynamic>?) != null
-            ? List<dynamic>.from(t['progress_logs'] as List<dynamic>)
-            : <dynamic>[];
-        logs.add({'date': nowIso, 'text': text});
-        t['progress_logs'] = logs;
+        t.remove('progress_logs');
       }
     });
   }
